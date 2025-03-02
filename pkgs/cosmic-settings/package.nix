@@ -10,7 +10,9 @@
   fontconfig,
   freetype,
   just,
+  libclang,
   libinput,
+  mold,
   pipewire,
   pkg-config,
   pulseaudio,
@@ -18,12 +20,19 @@
   util-linux,
   xkeyboard_config,
   nix-update-script,
+
+  withMoldLinker ? builtins.all (lib.meta.availableOn stdenv.hostPlatform) [
+    libclang
+    mold
+  ],
 }:
 
 let
   libcosmicAppHook' = (libcosmicAppHook.__spliced.buildHost or libcosmicAppHook).override {
     includeSettings = false;
   };
+
+  inherit (stdenv.hostPlatform.rust) cargoEnvVarTarget;
 in
 
 rustPlatform.buildRustPackage {
@@ -40,14 +49,19 @@ rustPlatform.buildRustPackage {
   useFetchCargoVendor = true;
   cargoHash = "sha256-OhkpJYe9Nfo8wqozamKfhPcPlaGmS0suGc43inLf/U0=";
 
-  nativeBuildInputs = [
-    libcosmicAppHook'
-    rustPlatform.bindgenHook
-    cmake
-    just
-    pkg-config
-    util-linux
-  ];
+  nativeBuildInputs =
+    [
+      libcosmicAppHook'
+      rustPlatform.bindgenHook
+      cmake
+      just
+      pkg-config
+      util-linux
+    ]
+    ++ lib.optionals withMoldLinker [
+      libclang
+      mold
+    ];
   buildInputs = [
     expat
     fontconfig
@@ -60,6 +74,14 @@ rustPlatform.buildRustPackage {
 
   dontUseJustBuild = true;
   dontUseJustCheck = true;
+
+  postConfigure = lib.optionalString withMoldLinker ''
+    if [ -n "''${CARGO_TARGET_${cargoEnvVarTarget}_RUSTFLAGS+x}" ]; then
+      export CARGO_TARGET_${cargoEnvVarTarget}_RUSTFLAGS="-C linker=${lib.getExe libclang} -C link-arg=--ld-path=${lib.getExe mold} $CARGO_TARGET_${cargoEnvVarTarget}_RUSTFLAGS"
+    else
+      export CARGO_TARGET_${cargoEnvVarTarget}_RUSTFLAGS="-C linker=${lib.getExe libclang} -C link-arg=--ld-path=${lib.getExe mold}"
+    fi
+  '';
 
   justFlags = [
     "--set"
